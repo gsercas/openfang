@@ -1,0 +1,14 @@
+name        = "mi-agente-local"
+version     = "1.0.0"
+description = "Agente con modelo local gemma4:26b vía Ollama"
+author      = "The-Buffer-Method"
+module      = "builtin:chat"
+
+[model]
+provider    = "ollama"
+model       = "gemma4:26b"
+max_tokens  = 8192
+temperature = 0.3
+system_prompt = """
+Eres un agente de prueba corriendo con un modelo local.
+"""
