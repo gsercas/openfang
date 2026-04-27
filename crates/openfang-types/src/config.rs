@@ -52,6 +52,30 @@ pub enum GroupPolicy {
     Ignore,
 }
 
+/// Prefix style applied to outbound agent messages on a channel.
+///
+/// When enabled, the channel bridge wraps the responding agent's reply with its
+/// name so end-users can tell which agent authored the message when multiple
+/// agents share the same channel. Default is `Off` to preserve existing
+/// behavior.
+///
+/// Platform-native identity (e.g. Slack per-message bot username override,
+/// Discord embed author field) is intentionally out of scope here and will be
+/// addressed in a follow-up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefixStyle {
+    /// No prefix — byte-identical to pre-feature behavior.
+    #[default]
+    Off,
+    /// Plain bracketed name: `[agent-name] text`.
+    Bracket,
+    /// Bold bracketed name via markdown: `**[agent-name]** text`.
+    /// Renders bold on platforms that support markdown (Discord, Telegram
+    /// markdown mode, Slack mrkdwn treats it as bold too).
+    BoldBracket,
+}
+
 /// Output format hint for channel-specific message formatting.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +117,12 @@ pub struct ChannelOverrides {
     /// Defaults to true. Set to false to suppress automatic reactions (e.g. on Telegram).
     #[serde(default = "default_true")]
     pub lifecycle_reactions: bool,
+    /// Prefix outbound messages with the responding agent's name.
+    ///
+    /// Defaults to `PrefixStyle::Off` so enabling this feature is opt-in per
+    /// channel and existing configs keep their current output byte-for-byte.
+    #[serde(default)]
+    pub prefix_agent_name: PrefixStyle,
 }
 
 impl Default for ChannelOverrides {
@@ -108,6 +138,7 @@ impl Default for ChannelOverrides {
             usage_footer: None,
             typing_mode: None,
             lifecycle_reactions: true,
+            prefix_agent_name: PrefixStyle::Off,
         }
     }
 }
@@ -1130,6 +1161,22 @@ pub struct KernelConfig {
     /// Heartbeat monitor settings.
     #[serde(default)]
     pub heartbeat: HeartbeatSettings,
+    /// Per-skill runtime config (from `[skills.<skill-name>]` sections).
+    ///
+    /// When a skill declares a `config:` section in its SKILL.md frontmatter,
+    /// the loader resolves each variable via:
+    /// 1. this map (outer key = skill name, inner key = var name),
+    /// 2. env var named by the var's `env` field,
+    /// 3. the var's `default`.
+    ///
+    /// Example `~/.openfang/config.toml`:
+    /// ```toml
+    /// [skills.github-repo-helper]
+    /// github_token = "ghp_..."
+    /// default_branch = "develop"
+    /// ```
+    #[serde(default)]
+    pub skills: HashMap<String, HashMap<String, String>>,
 }
 
 /// Heartbeat monitor settings exposed in `[heartbeat]` config section.
@@ -1367,6 +1414,7 @@ impl Default for KernelConfig {
             auth: AuthConfig::default(),
             workflows_dir: None,
             heartbeat: HeartbeatSettings::default(),
+            skills: HashMap::new(),
         }
     }
 }
@@ -1485,6 +1533,7 @@ impl std::fmt::Debug for KernelConfig {
                 &format!("{} mapping(s)", self.provider_api_keys.len()),
             )
             .field("auth", &format!("enabled={}", self.auth.enabled))
+            .field("skills", &format!("{} skill config(s)", self.skills.len()))
             .finish()
     }
 }
@@ -1792,6 +1841,10 @@ pub struct DiscordConfig {
     /// Default channel ID for outgoing messages when no recipient is specified.
     #[serde(default)]
     pub default_channel_id: Option<String>,
+    /// Channel IDs that respond without requiring @mention (free response mode).
+    /// In these channels, the bot responds to all group messages without needing to be mentioned.
+    #[serde(default, deserialize_with = "deserialize_string_or_int_vec")]
+    pub free_response_channels: Vec<String>,
     /// Per-channel behavior overrides.
     #[serde(default)]
     pub overrides: ChannelOverrides,
@@ -1807,6 +1860,7 @@ impl Default for DiscordConfig {
             intents: 37376,
             ignore_bots: true,
             default_channel_id: None,
+            free_response_channels: vec![],
             overrides: ChannelOverrides::default(),
         }
     }
@@ -2613,8 +2667,13 @@ impl Default for MqttConfig {
 pub struct RevoltConfig {
     /// Env var name holding the bot token.
     pub bot_token_env: String,
-    /// Revolt API URL.
+    /// Revolt API URL (set to your self-hosted instance URL if not using revolt.chat).
     pub api_url: String,
+    /// Revolt WebSocket URL (set to your self-hosted instance WS URL if not using revolt.chat).
+    pub ws_url: String,
+    /// Restrict to specific channel IDs (empty = all channels the bot is in).
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
     /// Default agent name to route messages to.
     pub default_agent: Option<String>,
     /// Per-channel behavior overrides.
@@ -2627,6 +2686,8 @@ impl Default for RevoltConfig {
         Self {
             bot_token_env: "REVOLT_BOT_TOKEN".to_string(),
             api_url: "https://api.revolt.chat".to_string(),
+            ws_url: "wss://ws.revolt.chat".to_string(),
+            allowed_channels: Vec::new(),
             default_agent: None,
             overrides: ChannelOverrides::default(),
         }
@@ -3704,6 +3765,26 @@ mod tests {
         "#;
         let dc2: DiscordConfig = toml::from_str(toml_str2).unwrap();
         assert!(dc2.ignore_bots);
+    }
+
+    #[test]
+    fn test_discord_config_free_response_channels_deserialization() {
+        // Test with free_response_channels as list of strings
+        let toml_str = r#"
+            bot_token_env = "DISCORD_BOT_TOKEN"
+            free_response_channels = ["123456789", "987654321"]
+        "#;
+        let dc: DiscordConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(dc.free_response_channels.len(), 2);
+        assert_eq!(dc.free_response_channels[0], "123456789");
+        assert_eq!(dc.free_response_channels[1], "987654321");
+
+        // Test default (empty list)
+        let toml_str2 = r#"
+            bot_token_env = "DISCORD_BOT_TOKEN"
+        "#;
+        let dc2: DiscordConfig = toml::from_str(toml_str2).unwrap();
+        assert!(dc2.free_response_channels.is_empty());
     }
 
     #[test]

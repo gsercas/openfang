@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "eb80ccaf-8417-4d32-9657-01d181124681",
+  "packageName": "mx.ordico.upvera",
+  "developer": {
+    "name": "Upvera",
+    "websiteUrl": "https://subhepatic-enlargingly-christina.ngrok-free.dev",
+    "privacyUrl": "https://subhepatic-enlargingly-christina.ngrok-free.dev",
+    "termsOfUseUrl": "https://subhepatic-enlargingly-christina.ngrok-free.dev"
+  },
+  "name": {
+    "short": "Upvera",
+    "full": "Upvera AI Agent"
+  },
+  "description": {
+    "short": "Agente de IA Upvera",
+    "full": "Upvera es tu asistente de inteligencia artificial disponible directamente en Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#FF6600",
+  "bots": [
+    {
+      "botId": "eb80ccaf-8417-4d32-9657-01d181124681",
+      "scopes": ["personal", "team", "groupchat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [
+    "subhepatic-enlargingly-christina.ngrok-free.dev"
+  ]
+}
